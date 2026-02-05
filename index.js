@@ -2,8 +2,6 @@ import { makeWASocket, useMultiFileAuthState, DisconnectReason } from '@whiskeys
 import { Boom } from '@hapi/boom';
 import pino from 'pino';
 import express from 'express';
-import session from 'express-session';
-import sessionFileStore from 'session-file-store';
 import { Server } from 'socket.io';
 import { createServer } from 'http';
 import QRCode from 'qrcode';
@@ -17,8 +15,6 @@ const __dirname = path.dirname(__filename);
 const isVercel = process.env.VERCEL === '1';
 const storagePath = isVercel ? '/tmp' : __dirname;
 
-const FileStore = sessionFileStore(session);
-
 const app = express();
 const httpServer = createServer(app);
 const io = new Server(httpServer, {
@@ -28,92 +24,31 @@ const io = new Server(httpServer, {
     }
 });
 
-// Session configuration with persistent file store
-const sessionMiddleware = session({
-    store: new FileStore({ 
-        path: path.join(storagePath, 'sessions'), 
-        ttl: 86400 * 7 
-    }), 
-    secret: 'whatsapp-secret-key',
-    resave: false,
-    saveUninitialized: false,
-    cookie: { 
-        secure: isVercel, // true on Vercel
-        maxAge: 7 * 24 * 60 * 60 * 1000, 
-        httpOnly: true,
-        sameSite: 'lax'
-    }
-});
-
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
-app.use(sessionMiddleware);
-
-// Shared session with socket.io
-io.engine.use(sessionMiddleware);
-
-const AUTH_CREDENTIALS = {
-    email: 'ksangeeth76',
-    password: 'Specd@123'
-};
 
 const API_KEY = 'wa_secret_123';
 
-// Middleware to check authentication
-const isAuthenticated = (req, res, next) => {
-    // Check for session first
-    if (req.session.loggedIn) {
-        return next();
-    }
-    
-    // Check for API key in query or headers
+// Middleware to check API Key for API endpoints
+const checkApiKey = (req, res, next) => {
     const providedKey = req.query.apikey || req.headers['x-api-key'];
     if (providedKey === API_KEY) {
         return next();
     }
-
-    // For /send endpoint, return JSON error instead of redirecting
-    if (req.path === '/send' || req.path === '/wa-status') {
-        return res.status(401).json({ 
-            success: false, 
-            message: 'Unauthorized. Provide a valid session or apikey parameter.' 
-        });
-    }
-
-    res.redirect('/login');
+    res.status(401).json({ 
+        success: false, 
+        message: 'Unauthorized. Provide a valid apikey parameter or x-api-key header.' 
+    });
 };
 
 // Routes
-app.get('/login', (req, res) => {
-    if (req.session.loggedIn) {
-        return res.redirect('/');
-    }
-    res.sendFile(path.join(__dirname, 'public', 'login.html'));
-});
-
-app.post('/login', (req, res) => {
-    const { email, password } = req.body;
-    if (email === AUTH_CREDENTIALS.email && password === AUTH_CREDENTIALS.password) {
-        req.session.loggedIn = true;
-        res.json({ success: true });
-    } else {
-        res.status(401).json({ success: false, message: 'Invalid credentials' });
-    }
-});
-
-app.get('/logout', (req, res) => {
-    req.session.destroy((err) => {
-        if (err) {
-            console.error('Error destroying session:', err);
-        }
-        res.clearCookie('connect.sid'); // Ensure the session cookie is cleared
-        res.redirect('/login');
-    });
+app.get('/', (req, res) => {
+    res.sendFile(path.join(__dirname, 'public', 'index.html'));
 });
 
 // API endpoint for sending messages via URL
 // Format: /send?number=919876543210&message=Hello
-app.get('/send', isAuthenticated, async (req, res) => {
+app.get('/send', checkApiKey, async (req, res) => {
     const { number, message } = req.query;
 
     if (!number || !message) {
@@ -149,7 +84,7 @@ app.get('/send', isAuthenticated, async (req, res) => {
     }
 });
 
-app.post('/wa-reset', isAuthenticated, (req, res) => {
+app.post('/wa-reset', (req, res) => {
     console.log('Forced reset requested...');
     connectionStatus = 'disconnected';
     qrCodeData = null;
@@ -175,7 +110,7 @@ app.post('/wa-reset', isAuthenticated, (req, res) => {
     }, 1000);
 });
 
-app.get('/wa-status', isAuthenticated, (req, res) => {
+app.get('/wa-status', (req, res) => {
     res.json({
         status: connectionStatus,
         qr: qrCodeData,
@@ -183,10 +118,7 @@ app.get('/wa-status', isAuthenticated, (req, res) => {
     });
 });
 
-// Protect static files except login
-app.get('/', isAuthenticated, (req, res) => {
-    res.sendFile(path.join(__dirname, 'public', 'index.html'));
-});
+
 
 app.use(express.static('public'));
 
@@ -268,14 +200,7 @@ async function connectToWhatsApp() {
 }
 
 io.on('connection', (socket) => {
-    const session = socket.request.session;
-    
-    if (!session || !session.loggedIn) {
-        socket.disconnect();
-        return;
-    }
-
-    console.log('Authenticated user connected to web UI');
+    console.log('User connected to web UI');
     
     socket.emit('status', connectionStatus === 'connected' ? 'connected' : (qrCodeData ? 'scan_qr' : 'connecting'));
     if (qrCodeData) {
