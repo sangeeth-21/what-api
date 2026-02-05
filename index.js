@@ -84,6 +84,43 @@ app.get('/send', checkApiKey, async (req, res) => {
     }
 });
 
+app.post('/wa-logout', async (req, res) => {
+    console.log('User requested WhatsApp logout...');
+    try {
+        if (sock) {
+            await sock.logout().catch(e => console.log('Socket already closed or logout error:', e.message));
+            sock.end();
+        }
+        
+        connectionStatus = 'disconnected';
+        qrCodeData = null;
+        linkedNumber = null;
+
+        // Clear session files
+        const authPath = path.join(storagePath, 'auth_info_baileys');
+        if (fs.existsSync(authPath)) {
+            // Give it a moment to release file handles
+            setTimeout(() => {
+                try {
+                    fs.rmSync(authPath, { recursive: true, force: true });
+                    console.log('WhatsApp session cleared successfully.');
+                    io.emit('status', 'disconnected');
+                    io.emit('qr', null);
+                    // Re-initiate connection to get a new QR
+                    connectToWhatsApp();
+                } catch (err) {
+                    console.error('Error deleting session folder:', err);
+                }
+            }, 1000);
+        }
+
+        res.json({ success: true, message: 'Logged out successfully' });
+    } catch (err) {
+        console.error('Logout error:', err);
+        res.status(500).json({ success: false, message: 'Logout failed' });
+    }
+});
+
 app.post('/wa-reset', (req, res) => {
     console.log('Forced reset requested...');
     connectionStatus = 'disconnected';
@@ -133,11 +170,57 @@ async function connectToWhatsApp() {
     io.emit('status', 'connecting');
 
     const authPath = path.join(storagePath, 'auth_info_baileys');
+    
+    // Check if session exists but is invalid/corrupted
+    if (fs.existsSync(authPath)) {
+        try {
+            const credsFile = path.join(authPath, 'creds.json');
+            if (fs.existsSync(credsFile)) {
+                const creds = JSON.parse(fs.readFileSync(credsFile, 'utf-8'));
+                if (!creds || !creds.noiseKey) {
+                    console.log('Corrupted session found. Clearing...');
+                    fs.rmSync(authPath, { recursive: true, force: true });
+                }
+            }
+        } catch (e) {
+            console.error('Error checking session validity:', e);
+            fs.rmSync(authPath, { recursive: true, force: true });
+        }
+    }
+
     const { state, saveCreds } = await useMultiFileAuthState(authPath);
 
     sock = makeWASocket({
         logger: pino({ level: 'silent' }),
         auth: state,
+        printQRInTerminal: false,
+        mobile: false,
+        keepAliveIntervalMs: 30000,
+        defaultQueryTimeoutMs: 60000,
+        connectTimeoutMs: 60000,
+        retryRequestDelayMs: 5000,
+        generateHighQualityQR: true,
+        patchMessageBeforeSending: (message) => {
+            const requiresPatch = !!(
+                message.buttonsMessage ||
+                message.templateMessage ||
+                message.listMessage
+            );
+            if (requiresPatch) {
+                message = {
+                    viewOnceMessage: {
+                        message: {
+                            messageContextInfo: {
+                                deviceListMetadata: {},
+                                deviceListMetadataVersion: 2
+                            },
+                            ...message
+                        }
+                    }
+                };
+            }
+            return message;
+        }
     });
 
     sock.ev.on('connection.update', async (update) => {
@@ -168,16 +251,15 @@ async function connectToWhatsApp() {
             io.emit('qr', null);
             
             if (shouldReconnect) {
-                console.log('Reconnecting to WhatsApp...');
-                connectToWhatsApp();
+                const delay = 3000;
+                console.log(`Reconnecting to WhatsApp in ${delay/1000}s...`);
+                setTimeout(connectToWhatsApp, delay);
             } else {
                 console.log('Logged out from WhatsApp. Session cleared.');
-                // Clear session files if logged out
                 const sessionPath = path.join(storagePath, 'auth_info_baileys');
                 if (fs.existsSync(sessionPath)) {
                     fs.rmSync(sessionPath, { recursive: true, force: true });
                 }
-                // Restart to show new QR
                 setTimeout(connectToWhatsApp, 2000);
             }
         } else if (connection === 'connecting') {
@@ -202,6 +284,10 @@ async function connectToWhatsApp() {
 io.on('connection', (socket) => {
     console.log('User connected to web UI');
     
+    socket.on('heartbeat', (data) => {
+        // Keep-alive from frontend
+    });
+
     socket.emit('status', connectionStatus === 'connected' ? 'connected' : (qrCodeData ? 'scan_qr' : 'connecting'));
     if (qrCodeData) {
         console.log('Emitting existing QR code to new socket connection');

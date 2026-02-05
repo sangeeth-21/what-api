@@ -4,6 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>API Documentation - WhatsApp Sender</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <script src="/socket.io/socket.io.js"></script>
     <style>
         :root {
@@ -94,32 +95,66 @@
             transform: rotate(15deg) scale(1.1);
         }
 
-        .linked-info { 
-            background: rgba(255,255,255,0.1); 
-            backdrop-filter: blur(4px);
-            padding: 6px 14px; 
-            border-radius: 12px; 
-            font-size: 0.85rem; 
-            border: 1px solid rgba(255,255,255,0.1);
-            animation: fadeIn 1s ease-out;
+        .logout-link {
+            padding: 0.6rem 1.2rem;
+            border-radius: 10px;
+            font-size: 0.85rem;
+            font-weight: 600;
+            transition: all 0.3s ease;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            text-decoration: none;
+            color: white;
+            background: rgba(255, 255, 255, 0.1);
+            border: 1px solid rgba(255, 255, 255, 0.1);
         }
 
-        .logout-link { 
-            color: white; 
-            text-decoration: none; 
-            font-weight: 600; 
-            font-size: 0.85rem; 
-            background: rgba(255, 255, 255, 0.1);
-            padding: 7px 16px; 
-            border-radius: 10px; 
-            transition: all 0.3s ease;
-            border: 1px solid rgba(255,255,255,0.1);
+        .logout-link i {
+            font-size: 1rem;
         }
-        .logout-link:hover { 
-            background: #ff4b2b; 
-            border-color: #ff4b2b;
-            box-shadow: 0 0 15px rgba(255, 75, 43, 0.4);
+
+        #wa-logout-btn:hover {
+            background: #ff4b2b !important;
+            border-color: #ff4b2b !important;
             transform: translateY(-2px);
+            box-shadow: 0 4px 15px rgba(255, 75, 43, 0.4);
+        }
+
+        #wa-disconnect-btn:hover {
+            background: rgba(255, 255, 255, 0.2) !important;
+            transform: translateY(-2px);
+        }
+
+        .linked-info {
+            background: rgba(18, 140, 126, 0.1);
+            color: var(--primary-color);
+            padding: 0.6rem 1rem;
+            border-radius: 10px;
+            font-size: 0.85rem;
+            font-weight: 600;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            border: 1px solid rgba(18, 140, 126, 0.2);
+        }
+
+        .linked-info::before {
+            content: '';
+            width: 8px;
+            height: 8px;
+            background: var(--primary-color);
+            border-radius: 50%;
+            display: inline-block;
+            box-shadow: 0 0 10px var(--primary-color);
+            animation: pulse-dot 2s infinite;
+        }
+
+        @keyframes pulse-dot {
+            0% { transform: scale(1); opacity: 1; }
+            50% { transform: scale(1.5); opacity: 0.5; }
+            100% { transform: scale(1); opacity: 1; }
         }
 
         main {
@@ -352,7 +387,10 @@
             <div id="linked-number-display" class="linked-info" style="display: none;">
                 <span id="phone-val"></span>
             </div>
-            <button id="wa-disconnect-btn" class="logout-link" style="display: none; background: rgba(255,0,0,0.1); border-color: rgba(255,0,0,0.2);">Disconnect WA</button>
+            <button id="wa-logout-btn" class="logout-link" style="display: none; background: rgba(255, 75, 43, 0.1); color: #ff4b2b; border: 1px solid rgba(255, 75, 43, 0.2);">
+                <i class="fas fa-sign-out-alt"></i> Logout WhatsApp
+            </button>
+            <button id="wa-disconnect-btn" class="logout-link" style="display: none; background: rgba(255, 255, 255, 0.1); border-color: rgba(255, 255, 255, 0.2);">Reset Connection</button>
         </div>
     </header>
 
@@ -422,12 +460,46 @@
         const linkedNumberDisplay = document.getElementById('linked-number-display');
         const phoneVal = document.getElementById('phone-val');
         const waDisconnectBtn = document.getElementById('wa-disconnect-btn');
+        const waLogoutBtn = document.getElementById('wa-logout-btn');
         const testSendBtn = document.getElementById('test-send-btn');
         const messageLog = document.getElementById('message-log');
         const themeToggle = document.getElementById('theme-toggle');
         const themeIcon = document.getElementById('theme-icon');
         const qrLoading = document.getElementById('qr-loading');
         const waResetBtn = document.getElementById('wa-reset-btn');
+
+        // Heartbeat to keep connection alive
+        setInterval(() => {
+            if (socket.connected) {
+                socket.emit('heartbeat', Date.now());
+            }
+        }, 30000);
+
+        waLogoutBtn.addEventListener('click', async () => {
+            if (confirm('Are you sure you want to logout from WhatsApp? This will disconnect your device completely.')) {
+                waLogoutBtn.disabled = true;
+                waLogoutBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Logging out...';
+                try {
+                    const res = await fetch('/wa-logout', { method: 'POST' });
+                    const data = await res.json();
+                    if (data.success) {
+                        qrImage.src = '';
+                        qrImage.style.display = 'none';
+                        qrLoading.style.display = 'flex';
+                        qrCard.style.display = 'block';
+                        docCard.style.display = 'none';
+                        linkedNumberDisplay.style.display = 'none';
+                        waLogoutBtn.style.display = 'none';
+                        waDisconnectBtn.style.display = 'none';
+                    }
+                } catch (err) {
+                    console.error('Logout failed:', err);
+                } finally {
+                    waLogoutBtn.disabled = false;
+                    waLogoutBtn.innerHTML = '<i class="fas fa-sign-out-alt"></i> Logout WhatsApp';
+                }
+            }
+        });
 
         waResetBtn.addEventListener('click', async () => {
             waResetBtn.disabled = true;
@@ -520,45 +592,54 @@
             }
         }
 
-        socket.on('status', (status) => {
+        function updateUI(status, number = null) {
             console.log('Status update:', status);
-            statusBanner.textContent = status.replace('_', ' ').toUpperCase();
-            statusBanner.className = `status-banner status-${status.replace('_', '-')}`;
             
             if (status === 'connected') {
+                statusBanner.className = 'status-banner status-connected';
+                statusBanner.textContent = 'WhatsApp Connected';
                 qrCard.style.display = 'none';
                 docCard.style.display = 'block';
-                docCard.style.opacity = '1';
-                docCard.style.pointerEvents = 'auto';
-                linkedNumberDisplay.style.display = 'block';
-                waDisconnectBtn.style.display = 'block';
-                qrLoading.style.display = 'none';
-            } else if (status === 'scan_qr') {
-                qrCard.style.display = 'block';
-                docCard.style.display = 'none';
-                linkedNumberDisplay.style.display = 'none';
-                waDisconnectBtn.style.display = 'none';
-                if (qrImage.src && qrImage.src.startsWith('data:image')) {
-                    qrImage.style.display = 'block';
-                    qrLoading.style.display = 'none';
-                } else {
-                    qrImage.style.display = 'none';
-                    qrLoading.style.display = 'flex';
+                if (number) {
+                    linkedNumberDisplay.style.display = 'flex';
+                    phoneVal.textContent = '+' + number;
+                    waLogoutBtn.style.display = 'flex';
+                    waDisconnectBtn.style.display = 'none';
                 }
-            } else if (status === 'connecting') {
+            } else if (status === 'scan_qr') {
+                statusBanner.className = 'status-banner status-disconnected';
+                statusBanner.textContent = 'Action Required: Scan QR Code';
                 qrCard.style.display = 'block';
-                qrImage.style.display = 'none';
-                qrLoading.style.display = 'flex';
                 docCard.style.display = 'none';
+                qrLoading.style.display = 'none';
+                qrImage.style.display = 'block';
                 linkedNumberDisplay.style.display = 'none';
+                waLogoutBtn.style.display = 'none';
+                waDisconnectBtn.style.display = 'none';
+            } else if (status === 'connecting') {
+                statusBanner.className = 'status-banner status-disconnected';
+                statusBanner.textContent = 'Connecting to WhatsApp...';
+                qrCard.style.display = 'block';
+                docCard.style.display = 'none';
+                qrLoading.style.display = 'flex';
+                qrImage.style.display = 'none';
+                linkedNumberDisplay.style.display = 'none';
+                waLogoutBtn.style.display = 'none';
                 waDisconnectBtn.style.display = 'none';
             } else {
+                statusBanner.className = 'status-banner status-disconnected';
+                statusBanner.textContent = 'WhatsApp Disconnected';
                 qrCard.style.display = 'block';
                 docCard.style.display = 'none';
+                qrLoading.style.display = 'flex';
+                qrImage.style.display = 'none';
                 linkedNumberDisplay.style.display = 'none';
+                waLogoutBtn.style.display = 'none';
                 waDisconnectBtn.style.display = 'none';
             }
-        });
+        }
+
+        socket.on('status', (status) => updateUI(status));
 
         socket.on('qr', (url) => {
             console.log('--- QR CODE EVENT RECEIVED ---');
@@ -589,12 +670,8 @@
         });
 
         socket.on('linked_number', (number) => {
-            if (number) {
-                phoneVal.textContent = '+' + number;
-                linkedNumberDisplay.style.display = 'block';
-            } else {
-                linkedNumberDisplay.style.display = 'none';
-            }
+            console.log('Linked number event:', number);
+            updateUI('connected', number);
         });
 
         socket.on('success', (msg) => {
