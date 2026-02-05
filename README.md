@@ -11,6 +11,27 @@ A modern, glassmorphic WhatsApp message sender application built with Node.js an
 - **Real-time Status**: Live connection status and QR updates via Socket.io.
 - **Postman Ready**: Easy integration with external tools and automated workflows.
 
+## 🚀 Deployment
+
+### Vercel (Not Recommended for Production)
+While this app includes a `vercel.json` for compatibility, **Vercel is not ideal for WhatsApp bots** because:
+1. **Serverless functions** sleep after a few minutes, killing the WhatsApp connection.
+2. **Ephemeral storage**: The session will be lost every time the function restarts, requiring a new QR scan.
+3. **WebSockets**: Socket.io has limited support on Vercel's serverless platform.
+
+### Recommended Hosting (Persistent Servers)
+For a stable 24/7 connection, we recommend using a platform that supports long-running processes:
+- **[Render](https://render.com/)** (Web Service)
+- **[Railway](https://railway.app/)**
+- **[DigitalOcean App Platform](https://www.digitalocean.com/products/app-platform)**
+- **[Fly.io](https://fly.io/)**
+
+#### Steps for Render/Railway:
+1. Connect your GitHub repository.
+2. Set the build command: `npm install`
+3. Set the start command: `npm start`
+4. Ensure the port is set to `3000` or use the environment variable `PORT`.
+
 ## 🛠 Installation
 
 ### Prerequisites

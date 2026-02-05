@@ -11,25 +11,37 @@ import path from 'path';
 import fs from 'fs';
 import { fileURLToPath } from 'url';
 
-const FileStore = sessionFileStore(session);
-
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
+const isVercel = process.env.VERCEL === '1';
+const storagePath = isVercel ? '/tmp' : __dirname;
+
+const FileStore = sessionFileStore(session);
+
 const app = express();
 const httpServer = createServer(app);
-const io = new Server(httpServer);
+const io = new Server(httpServer, {
+    cors: {
+        origin: "*",
+        methods: ["GET", "POST"]
+    }
+});
 
 // Session configuration with persistent file store
 const sessionMiddleware = session({
-    store: new FileStore({ path: './sessions', ttl: 86400 * 7 }), // 7 days
+    store: new FileStore({ 
+        path: path.join(storagePath, 'sessions'), 
+        ttl: 86400 * 7 
+    }), 
     secret: 'whatsapp-secret-key',
     resave: false,
     saveUninitialized: false,
     cookie: { 
-        secure: false, 
-        maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
-        httpOnly: true 
+        secure: isVercel, // true on Vercel
+        maxAge: 7 * 24 * 60 * 60 * 1000, 
+        httpOnly: true,
+        sameSite: 'lax'
     }
 });
 
@@ -148,7 +160,7 @@ app.post('/wa-reset', isAuthenticated, (req, res) => {
         sock.end();
     }
     
-    const sessionPath = path.join(__dirname, 'auth_info_baileys');
+    const sessionPath = path.join(storagePath, 'auth_info_baileys');
     if (fs.existsSync(sessionPath)) {
         fs.rmSync(sessionPath, { recursive: true, force: true });
         console.log('Session directory cleared.');
@@ -188,7 +200,8 @@ async function connectToWhatsApp() {
     connectionStatus = 'connecting';
     io.emit('status', 'connecting');
 
-    const { state, saveCreds } = await useMultiFileAuthState('auth_info_baileys');
+    const authPath = path.join(storagePath, 'auth_info_baileys');
+    const { state, saveCreds } = await useMultiFileAuthState(authPath);
 
     sock = makeWASocket({
         logger: pino({ level: 'silent' }),
@@ -228,7 +241,7 @@ async function connectToWhatsApp() {
             } else {
                 console.log('Logged out from WhatsApp. Session cleared.');
                 // Clear session files if logged out
-                const sessionPath = path.join(__dirname, 'auth_info_baileys');
+                const sessionPath = path.join(storagePath, 'auth_info_baileys');
                 if (fs.existsSync(sessionPath)) {
                     fs.rmSync(sessionPath, { recursive: true, force: true });
                 }
@@ -321,7 +334,7 @@ io.on('connection', (socket) => {
                 io.emit('qr', null);
                 
                 // 4. Wipe session files
-                const sessionPath = path.join(__dirname, 'auth_info_baileys');
+                const sessionPath = path.join(storagePath, 'auth_info_baileys');
                 if (fs.existsSync(sessionPath)) {
                     // Try multiple times to delete if busy
                     for (let i = 0; i < 3; i++) {
